@@ -36,3 +36,82 @@ class SpanModel(BaseModel):
 
 # ContextVar para rastrear el Span activo de forma segura en entornos async e hilos
 _active_span_var: ContextVar[Optional[SpanModel]] = ContextVar("active_span", default=None)
+
+
+class GlobalTracer:
+    """
+    Motor de Observabilidad central (Tracer).
+    
+    Gestiona el ciclo de vida de los Spans en una estructura de árbol jerárquica,
+    acumula estadísticas agregadas (tokens, coste) y exporta trazas en ASCII e HTML.
+    """
+
+    def __init__(self) -> None:
+        self.root_spans: List[SpanModel] = []
+        # Mapa plano para accesos rápidos por ID
+        self.span_map: Dict[str, SpanModel] = {}
+
+    def start_span(
+        self,
+        name: str,
+        inputs: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> SpanModel:
+        """Inicializa un nuevo span jerárquico bajo el span activo actual."""
+        parent = _active_span_var.get()
+        
+        span = SpanModel(
+            name=name,
+            parent_id=parent.id if parent else None,
+            start_time=time.time(),
+            inputs=inputs or {},
+            metadata=metadata or {}
+        )
+        
+        self.span_map[span.id] = span
+        
+        if parent:
+            parent.children.append(span)
+        else:
+            self.root_spans.append(span)
+            
+        _active_span_var.set(span)
+        return span
+
+    def end_span(
+        self,
+        outputs: Optional[Dict[str, Any]] = None,
+        error: Optional[Exception] = None,
+        metadata_update: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Finaliza el span activo actual, registrando salidas, errores y duraciones."""
+        span = _active_span_var.get()
+        if not span:
+            logger.warning("Intento de finalizar un span sin ningún span activo en el contexto.")
+            return
+            
+        span.end_time = time.time()
+        if outputs:
+            span.outputs.update(outputs)
+        if error:
+            span.error = f"{type(error).__name__}: {str(error)}"
+        if metadata_update:
+            span.metadata.update(metadata_update)
+            
+        # Retornamos al span padre en el contexto actual
+        if span.parent_id:
+            parent = self.span_map.get(span.parent_id)
+            _active_span_var.set(parent)
+        else:
+            _active_span_var.set(None)
+
+    def clear(self) -> None:
+        """Reinicia el historial de trazas acumulado."""
+        self.root_spans = []
+        self.span_map = {}
+        _active_span_var.set(None)
+
+    def get_trace_tree(self) -> List[Dict[str, Any]]:
+        """Devuelve el árbol completo de trazas serializado en diccionarios."""
+        return [span.model_dump() for span in self.root_spans]
+
