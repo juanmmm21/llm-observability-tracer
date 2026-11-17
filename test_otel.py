@@ -91,6 +91,19 @@ class TestLiveExport(unittest.TestCase):
         self.assertEqual(sp.status.status_code, StatusCode.ERROR)
         self.assertEqual(sp.attributes["error.type"], "ValueError")
 
+    def test_record_span_with_explicit_times(self) -> None:
+        tracer, exporter = make()
+        root = tracer.record_span("turn general", 1000.0, 1002.5, {"origin": "telegram"})
+        tracer.record_span("route", 1000.1, 1000.3, parent=root)
+        tracer.record_span("llm", 1000.4, 1002.4, {"operation": "chat", "model": "gemini"}, parent=root)
+        spans = {sp.name: sp for sp in exporter.get_finished_spans()}
+        self.assertEqual(spans["turn general"].start_time, 1000 * 10**9)
+        self.assertEqual(spans["turn general"].end_time, int(1002.5 * 10**9))
+        self.assertEqual(spans["chat gemini"].parent.span_id, spans["turn general"].context.span_id)
+        self.assertEqual(spans["route"].attributes.get("ai_core.origin"), None)
+        tracer.record_tree([root])
+        self.assertEqual(tracer.root_spans, [])
+
     def test_bridge_failures_never_break_tracing(self) -> None:
         class Broken:
             def on_start(self, span, parent):

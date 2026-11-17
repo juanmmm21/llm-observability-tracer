@@ -137,6 +137,47 @@ class GlobalTracer:
         else:
             _active_span_var.set(None)
 
+    def record_span(
+        self,
+        name: str,
+        start_time: float,
+        end_time: float,
+        metadata: Optional[Dict[str, Any]] = None,
+        parent: Optional[SpanModel] = None,
+        error: Optional[str] = None,
+    ) -> SpanModel:
+        """Registra un span ya terminado, con sus tiempos (segundos epoch), bajo ``parent``.
+
+        Para quien mide por su cuenta y exporta después (una aplicación con su propia traza de
+        turnos): no toca el span activo del contexto."""
+        span = SpanModel(
+            name=name,
+            parent_id=parent.id if parent else None,
+            start_time=start_time,
+            end_time=end_time,
+            metadata=dict(metadata or {}),
+            error=error,
+        )
+        self.span_map[span.id] = span
+        if parent:
+            parent.children.append(span)
+        else:
+            self.root_spans.append(span)
+        if self.otel is not None:
+            try:
+                self.otel.on_start(span, parent)
+                self.otel.on_end(span)
+            except Exception as exc:
+                logger.warning(f"OpenTelemetry: no se pudo exportar el span: {exc}")
+        return span
+
+    def record_tree(self, spans: List[SpanModel]) -> None:
+        """Olvida spans registrados (``record_span``) que ya se exportaron, para no crecer sin fin."""
+        for span in spans:
+            self.span_map.pop(span.id, None)
+            if span in self.root_spans:
+                self.root_spans.remove(span)
+
     @contextlib.contextmanager
     def span(self, name: str, inputs: Optional[Dict[str, Any]] = None, **metadata: Any):
         """``with tracer.span("llm", operation="chat", model="qwen2.5", provider="ollama") as s:``
