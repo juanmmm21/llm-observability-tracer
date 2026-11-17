@@ -110,7 +110,7 @@ class TestLlmObservabilityTracer(unittest.TestCase):
         with open(html_path, "r", encoding="utf-8") as f:
             content = f.read()
             self.assertIn("Monitoreo End-to-End", content)
-            document_js_data = 'const traceData = ['
+
             self.assertIn("traceData", content)
 
 

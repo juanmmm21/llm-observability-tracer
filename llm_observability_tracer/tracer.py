@@ -5,7 +5,7 @@ import uuid
 import logging
 import functools
 from contextvars import ContextVar
-from typing import Dict, List, Any, Tuple, Optional, Callable
+from typing import Dict, List, Any, Optional, Callable
 from pydantic import BaseModel, Field
 
 # Logger para auditoría telemetral

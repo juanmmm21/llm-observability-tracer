@@ -119,8 +119,8 @@ def run_demo() -> None:
     html_output_path = os.path.abspath("./observability_flamegraph.html")
     tracer.generate_html_flamegraph(html_output_path)
     
-    print(f"\n[EXITO] Se ha exportado el Flame Graph interactivo de observabilidad.")
-    print(f"Abra el archivo en su navegador para ver la linea temporal y detalles:")
+    print("\n[EXITO] Se ha exportado el Flame Graph interactivo de observabilidad.")
+    print("Abra el archivo en su navegador para ver la linea temporal y detalles:")
     print(f"  file://{html_output_path}")
     print("=" * 80)
 
