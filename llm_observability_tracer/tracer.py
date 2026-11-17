@@ -3,6 +3,7 @@ import json
 import time
 import uuid
 import logging
+import contextlib
 import functools
 from contextvars import ContextVar
 from typing import Dict, List, Any, Optional, Callable
@@ -44,10 +45,31 @@ class GlobalTracer:
     acumula estadísticas agregadas (tokens, coste) y exporta trazas en ASCII e HTML.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, otel: Optional[Any] = None) -> None:
         self.root_spans: List[SpanModel] = []
         # Mapa plano para accesos rápidos por ID
         self.span_map: Dict[str, SpanModel] = {}
+        # Puente opcional a OpenTelemetry (ver otel.py): refleja cada span en vivo.
+        self.otel = otel
+
+    def enable_otel(
+        self,
+        endpoint: str = "http://localhost:4318/v1/traces",
+        service_name: str = "ai-core",
+        capture_content: bool = False,
+        tracer_provider: Optional[Any] = None,
+    ) -> Any:
+        """Exporta los spans por OTLP con las convenciones semánticas GenAI de OpenTelemetry.
+        El contenido (entradas y salidas) no se exporta salvo ``capture_content=True``."""
+        from .otel import OTelBridge
+
+        self.otel = OTelBridge(
+            tracer_provider=tracer_provider,
+            endpoint=endpoint,
+            service_name=service_name,
+            capture_content=capture_content,
+        )
+        return self.otel
 
     def start_span(
         self,
@@ -72,7 +94,13 @@ class GlobalTracer:
             parent.children.append(span)
         else:
             self.root_spans.append(span)
-            
+
+        if self.otel is not None:
+            try:
+                self.otel.on_start(span, parent)
+            except Exception as exc:  # la exportación nunca debe romper la aplicación
+                logger.warning(f"OpenTelemetry: no se pudo abrir el span: {exc}")
+
         _active_span_var.set(span)
         return span
 
@@ -95,6 +123,12 @@ class GlobalTracer:
             span.error = f"{type(error).__name__}: {str(error)}"
         if metadata_update:
             span.metadata.update(metadata_update)
+
+        if self.otel is not None:
+            try:
+                self.otel.on_end(span)
+            except Exception as exc:
+                logger.warning(f"OpenTelemetry: no se pudo cerrar el span: {exc}")
             
         # Retornamos al span padre en el contexto actual
         if span.parent_id:
@@ -102,6 +136,19 @@ class GlobalTracer:
             _active_span_var.set(parent)
         else:
             _active_span_var.set(None)
+
+    @contextlib.contextmanager
+    def span(self, name: str, inputs: Optional[Dict[str, Any]] = None, **metadata: Any):
+        """``with tracer.span("llm", operation="chat", model="qwen2.5", provider="ollama") as s:``
+        — dentro se pueden rellenar ``s.outputs`` y ``s.metadata`` (p. ej. ``output_tokens``)."""
+        s = self.start_span(name, inputs=inputs, metadata=metadata)
+        try:
+            yield s
+        except Exception as e:
+            self.end_span(error=e)
+            raise
+        else:
+            self.end_span()
 
     def clear(self) -> None:
         """Reinicia el historial de trazas acumulado."""

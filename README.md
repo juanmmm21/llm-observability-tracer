@@ -75,6 +75,53 @@ This module acts as the central inspector of the suite:
 *   `test_tracer.py`: Unit test suite that checks the tree hierarchy, the stability of the isolated async context under concurrent executions, exception capture, and cost calculation.
 *   `example.py`: Interactive simulation script that instruments a complete RAG flow with nested database calls, rerankers, and guardrails, printing the report to the console and generating the HTML visualizer on disk.
 
+## OpenTelemetry export (GenAI semantic conventions)
+
+Since `0.1.0` every span can be mirrored live to OpenTelemetry and sent over OTLP to Jaeger,
+Grafana Tempo or any collector, with the attributes of the
+[GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
+
+```python
+from llm_observability_tracer import GlobalTracer
+
+tracer = GlobalTracer()
+tracer.enable_otel(endpoint="http://localhost:4318/v1/traces", service_name="my-app")
+
+with tracer.span("rag pipeline"):
+    with tracer.span("llm", operation="chat", provider="ollama", model="qwen2.5:0.5b", temperature=0) as s:
+        ...                                   # call the model
+        s.metadata.update(input_tokens=412, output_tokens=6, finish_reason="stop")
+```
+
+*   A span with `operation` `chat`, `text_completion`, `generate_content` or `embeddings` is a
+    model call: it is named `"{operation} {model}"`, has kind `CLIENT` and carries
+    `gen_ai.operation.name`, `gen_ai.provider.name` (plus the legacy `gen_ai.system`),
+    `gen_ai.request.model`, `gen_ai.request.temperature/top_p/top_k/max_tokens/seed`,
+    `gen_ai.response.model/id/finish_reasons`, `gen_ai.usage.input_tokens/output_tokens` and
+    `server.address/port`. `execute_tool` and `invoke_agent` spans get `gen_ai.tool.name` /
+    `gen_ai.agent.name`. Anything else is kept as `ai_core.<key>`.
+*   Parent/child structure and start/end times are the tracer's own, so the OTel trace is the
+    same tree the HTML flame graph shows. Errors set status `ERROR` and `error.type`.
+*   **Prompts and completions are not exported** unless `capture_content=True` (then as
+    `gen_ai.input.messages` / `gen_ai.output.messages`). Traces carry timings, models and token
+    counts, not what people wrote.
+*   A collector that is down never breaks the application: export failures are logged and
+    ignored.
+
+Install with `pip install "llm-observability-tracer[otel]"`. To see the traces:
+
+```bash
+docker compose -f deploy/otel/docker-compose.yml up -d     # Jaeger: http://localhost:16686
+python example_otel.py
+docker compose -f deploy/otel/docker-compose.yml --profile tempo up -d   # Tempo + Grafana: :3000
+```
+
+Verified in this repository's session against `jaegertracing/all-in-one:1.76.0` (OpenTelemetry
+SDK 1.45, OTLP/HTTP): the four spans of `example_otel.py` arrive as one trace, with the attributes
+above, queried back through Jaeger's API.
+
+![A trace of example_otel.py in Jaeger](docs/jaeger-genai-trace.png)
+
 ## Using it as a package
 
 Since `0.1.0` the code lives in the `llm_observability_tracer` package and the repository is
