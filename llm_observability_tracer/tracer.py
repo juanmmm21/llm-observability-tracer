@@ -8,8 +8,6 @@ from contextvars import ContextVar
 from typing import Dict, List, Any, Optional, Callable
 from pydantic import BaseModel, Field
 
-# Logger para auditoría telemetral
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
