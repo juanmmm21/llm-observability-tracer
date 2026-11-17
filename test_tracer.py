@@ -3,7 +3,7 @@ import os
 import tempfile
 import shutil
 import time
-from tracer import tracer, trace_span
+from llm_observability_tracer.tracer import tracer, trace_span
 
 class TestLlmObservabilityTracer(unittest.TestCase):
 

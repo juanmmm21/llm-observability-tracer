@@ -75,6 +75,28 @@ This module acts as the central inspector of the suite:
 *   `test_tracer.py`: Unit test suite that checks the tree hierarchy, the stability of the isolated async context under concurrent executions, exception capture, and cost calculation.
 *   `example.py`: Interactive simulation script that instruments a complete RAG flow with nested database calls, rerankers, and guardrails, printing the report to the console and generating the HTML visualizer on disk.
 
+## Using it as a package
+
+Since `0.1.0` the code lives in the `llm_observability_tracer` package and the repository is
+pip-installable, so other projects can depend on it instead of copying files
+or editing `sys.path`:
+
+```bash
+pip install "llm-observability-tracer @ git+https://github.com/juanmmm21/llm-observability-tracer.git@v0.1.0"
+```
+
+```python
+from llm_observability_tracer import SpanModel, GlobalTracer
+```
+
+The old top-level modules are kept as thin re-exports, so scripts that add
+this folder to `sys.path` keep working. This component imports no other
+ai-core component: they are combined in the `aicore` SDK of
+[ai-core-infra-hub](https://github.com/juanmmm21/ai-core-infra-hub), which
+passes collaborators (vector stores, encoders, tokenizers) in by injection.
+
+Development: `pip install -e ".[dev]"`, then `pytest` and `ruff check .`.
+
 ## Installation and Execution
 
 ### 1. Activate the Local Environment and Install Dependencies

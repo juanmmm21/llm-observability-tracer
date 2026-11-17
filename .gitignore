@@ -16,3 +16,8 @@ env/
 *.json
 *.html
 !template.html
+
+# Packaging
+build/
+dist/
+*.egg-info/
