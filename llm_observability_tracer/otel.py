@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ GENAI_KEYS: Dict[str, str] = {
     "server_port": "server.port",
     "cost": "gen_ai.usage.cost",
 }
+MAX_ENDED = 10_000
 MODEL_OPERATIONS = {"chat", "text_completion", "generate_content", "embeddings"}
 # Keys that describe a model request/response: only meaningful on model-call spans (a retriever's
 # ``top_k`` is not ``gen_ai.request.top_k``).
@@ -148,10 +150,16 @@ class OTelBridge:
         self.otel_tracer = tracer_provider.get_tracer("llm-observability-tracer")
         self.capture_content = capture_content
         self._live: Dict[str, Any] = {}
+        # Contexts of spans already ended, so children recorded afterwards still link to them.
+        self._ended: "OrderedDict[str, Any]" = OrderedDict()
 
     def on_start(self, span: Any, parent: Any) -> None:
         kind = self._trace.SpanKind.CLIENT if span.metadata.get("operation") in MODEL_OPERATIONS else self._trace.SpanKind.INTERNAL
-        parent_otel = self._live.get(parent.id) if parent is not None else None
+        parent_otel = None
+        if parent is not None:
+            parent_otel = self._live.get(parent.id)
+            if parent_otel is None and parent.id in self._ended:
+                parent_otel = self._trace.NonRecordingSpan(self._ended[parent.id])
         ctx = self._trace.set_span_in_context(parent_otel) if parent_otel is not None else None
         otel_span = self.otel_tracer.start_span(
             span_name(span.name, span.metadata),
@@ -165,6 +173,9 @@ class OTelBridge:
         otel_span = self._live.pop(span.id, None)
         if otel_span is None:
             return
+        self._ended[span.id] = otel_span.get_span_context()
+        while len(self._ended) > MAX_ENDED:
+            self._ended.popitem(last=False)
         name = span_name(span.name, span.metadata)
         if name != span.name:
             otel_span.update_name(name)
